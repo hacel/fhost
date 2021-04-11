@@ -11,7 +11,13 @@ import (
 	"time"
 )
 
-const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+const (
+	letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+)
+
+var (
+	logger *log.Logger
+)
 
 func randString() string {
 	b := make([]byte, 3)
@@ -21,11 +27,21 @@ func randString() string {
 	return string(b)
 }
 
+func index(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		fmt.Fprintf(w, "yourserver\n")
+	case "POST":
+		r.URL.Path += "files/"
+		fhost(w, r)
+	}
+}
+
 func fhost(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
-		if len(r.URL.Path) > 1 {
-			http.ServeFile(w, r, filepath.Join("files", r.URL.Path[1:]))
+		if len(r.URL.Path[len("/files/"):]) > 0 {
+			http.ServeFile(w, r, r.URL.Path[1:])
 			return
 		}
 		fmt.Fprintf(w, `HTTP POST:
@@ -34,7 +50,7 @@ func fhost(w http.ResponseWriter, r *http.Request) {
 	case "POST":
 		file, handler, err := r.FormFile("file")
 		if err != nil {
-			log.Println("error: failed to retrieve file in request: ", err)
+			logger.Println("error: failed to retrieve file in request: ", err)
 			return
 		}
 		defer file.Close()
@@ -50,34 +66,50 @@ func fhost(w http.ResponseWriter, r *http.Request) {
 		}
 		defer tempFile.Close()
 		if tempFile == nil {
-			log.Println("error: server reached max number of files")
+			logger.Println("error: server reached max number of files")
 			return
 		}
-		log.Printf("uploaded file: %s (%.1fK) -> %s\n", handler.Filename, float64(handler.Size)/1024, tempFile.Name())
+		logger.Printf("uploaded file: %s (%.1fK) -> %s", handler.Filename, float64(handler.Size)/1024, tempFile.Name())
 
 		fileBytes, err := ioutil.ReadAll(file)
 		if err != nil {
-			log.Println("error: could not read file: ", err)
+			logger.Println("error: could not read file: ", err)
 			return
 		}
 		if _, err := tempFile.Write(fileBytes); err != nil {
-			log.Println("error: could not write to file: ", err)
+			logger.Println("error: could not write to file: ", err)
 			return
 		}
 
 		fmt.Fprintf(w, "%s%s\n", r.URL.Path, filepath.Base(tempFile.Name()))
-	default:
-		return
 	}
 }
 
+func logHandler(next http.Handler) http.Handler {
+	return http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			logger.Println(r.Method, r.RemoteAddr)
+			next.ServeHTTP(w, r)
+		},
+	)
+}
+
 func main() {
+	rand.Seed(time.Now().UnixNano())
 	if _, err := os.Stat("files"); os.IsNotExist(err) {
 		if err := os.Mkdir("files", 0755); err != nil {
 			log.Fatal(err)
 		}
 	}
-	http.HandleFunc("/", fhost)
-	rand.Seed(time.Now().UnixNano())
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	logf, err := os.OpenFile("serv.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer logf.Close()
+	logger = log.New(logf, "", log.LstdFlags)
+
+	router := http.NewServeMux()
+	router.HandleFunc("/", index)
+	router.HandleFunc("/files/", fhost)
+	log.Fatal(http.ListenAndServe(":8080", logHandler(router)))
 }
