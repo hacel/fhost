@@ -30,7 +30,8 @@ func randString() string {
 func index(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
-		fmt.Fprintf(w, "yourserver\n")
+		fmt.Fprintf(w, `<a href="/files/">files</a>`)
+		fmt.Fprintf(w, "<pre>yourserver</pre>\n")
 	case "POST":
 		r.URL.Path += "files/"
 		fhost(w, r)
@@ -44,7 +45,8 @@ func fhost(w http.ResponseWriter, r *http.Request) {
 			http.ServeFile(w, r, r.URL.Path[1:])
 			return
 		}
-		fmt.Fprintf(w, `HTTP POST:
+		fmt.Fprintf(w, "<div>%s</div>", `<form enctype="multipart/form-data" method="post"><input type="file" id="file" name="file"><input type="submit"></form>`)
+		fmt.Fprintf(w, "<pre>%s</pre>", `HTTP POST:
 	curl -F'file=@yourfile.ext' http://yourserver/`)
 
 	case "POST":
@@ -81,14 +83,13 @@ func fhost(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		fmt.Fprintf(w, "%s%s\n", r.URL.Path, filepath.Base(tempFile.Name()))
+		fmt.Fprintf(w, "%s%s%s\n", r.Host, r.URL.Path, filepath.Base(tempFile.Name()))
 	}
 }
 
 func logHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
-			logger.Println(r.Method, r.RemoteAddr)
 			next.ServeHTTP(w, r)
 		},
 	)
@@ -96,20 +97,20 @@ func logHandler(next http.Handler) http.Handler {
 
 func main() {
 	rand.Seed(time.Now().UnixNano())
-	if _, err := os.Stat("files"); os.IsNotExist(err) {
-		if err := os.Mkdir("files", 0755); err != nil {
-			log.Fatal(err)
-		}
-	}
 	logf, err := os.OpenFile("serv.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer logf.Close()
 	logger = log.New(logf, "", log.LstdFlags)
+	if _, err := os.Stat("files"); os.IsNotExist(err) {
+		if err := os.Mkdir("files", 0755); err != nil {
+			log.Fatal(err)
+		}
+	}
 
 	router := http.NewServeMux()
 	router.HandleFunc("/", index)
 	router.HandleFunc("/files/", fhost)
-	log.Fatal(http.ListenAndServe(":8080", logHandler(router)))
+	logger.Fatal(http.ListenAndServe(":9990", logHandler(router)))
 }
